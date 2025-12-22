@@ -22,7 +22,7 @@ function initializeScreen() {
   // Create the main screen
   screen = blessed.screen({
     smartCSR: true,
-    title: "AI Studio",
+    title: "Agent Studio",
     dockBorders: true,
   });
 
@@ -70,7 +70,6 @@ function initializeScreen() {
     inputOnFocus: true,
   });
 
-
   // Append to screen
   screen.append(contentBox);
   screen.append(inputBox);
@@ -95,7 +94,7 @@ function addToContent(text) {
 }
 
 async function showWelcome() {
-  const welcomeText = figlet.textSync(`Welcome to\n \nAI Studio `, {
+  const welcomeText = figlet.textSync(`Welcome to\n \nAgent Studio`, {
     font: "Standard",
     horizontalLayout: "full",
     verticalLayout: "fitted",
@@ -104,8 +103,8 @@ async function showWelcome() {
   addToContent(chalk.hex("#876DF5").bold(welcomeText));
   addToContent(
     chalk.bold(
-      `Enter your query and our state of the art model will help you out`
-    )
+      `Enter your query and our state of the art model will help you out`,
+    ),
   );
   await sleep();
 }
@@ -180,11 +179,15 @@ async function processQuery(userText) {
       });
 
       if (parsedContent.step === "START") {
-        addToContent(`${chalk.cyan.bold("INITIATED")}: ${parsedContent.content}`);
+        addToContent(
+          `${chalk.cyan.bold("INITIATED")}: ${parsedContent.content}`,
+        );
         addToContent("");
         continue;
       } else if (parsedContent.step === "THINK") {
-        addToContent(`${chalk.cyan.bold("THINKING")}: ${parsedContent.content}`);
+        addToContent(
+          `${chalk.cyan.bold("THINKING")}: ${parsedContent.content}`,
+        );
         addToContent("");
         await sleep(1000);
         continue;
@@ -198,9 +201,8 @@ async function processQuery(userText) {
         } else {
           const toolResponse = await TOOL_MAP[toolCalled](parsedContent.input);
           addToContent(
-            `${chalk.cyan.bold("PROCESS:")}${toolCalled}(${
-              parsedContent.input
-            }) = ${toolResponse}`
+            `${chalk.cyan.bold("PROCESS:")}${toolCalled}(${parsedContent.input
+            }) = ${toolResponse}`,
           );
           messagesArr.push({
             role: "developer",
