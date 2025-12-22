@@ -1,4 +1,4 @@
-node agentSimple.js  
+node agent.js  
 [dotenv@17.2.1] injecting env (4) from ../../.env -- tip: ⚙️ suppress all logs with { quiet: true }
 Welcome to AI Studio
 
