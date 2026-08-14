@@ -98,7 +98,7 @@ function printHeader(title) {
   console.log(chalk.cyan.bold("=".repeat(60)) + "\n");
 }
 
-function showHelp() {
+function renderHelp() {
   console.log("");
   console.log(chalk.cyan.bold("Agent Studio") + " - CLI Coding Agent");
   console.log("");
@@ -111,6 +111,7 @@ function showHelp() {
   console.log("  auto        Self-improving loop: plan -> build -> evaluate -> (retry/commit)");
   console.log("");
   console.log(bold("COMMANDS (plan mode)"));
+  console.log("  /          Open command palette");
   console.log("  /connect    Set or change your API key");
   console.log("  /keys       Manage stored API keys");
   console.log("  /env        Show current configuration");
@@ -131,10 +132,22 @@ function showHelp() {
   console.log('  mini-agent auto --issue "Fix XSS"  # auto-loop on text issue');
   console.log("  mini-agent build                     # interactive build");
   console.log("  npx mini-agent plan                  # run without installing");
+}
+
+function showHelp() {
+  renderHelp();
   process.exit(0);
 }
 
 if (args.help) showHelp();
+
+const STUDIO_COMMANDS = [
+  { id: "connect", label: "/connect", description: "Set or change your API key" },
+  { id: "keys", label: "/keys", description: "Manage stored API keys" },
+  { id: "env", label: "/env", description: "Show current configuration" },
+  { id: "help", label: "/help", description: "Show help" },
+  { id: "exit", label: "/exit", description: "Quit the app" },
+];
 
 const MODE_LABELS = {
   plan: { label: "PLAN", fg: chalk.black, bg: chalk.bgGreenBright },
@@ -145,10 +158,33 @@ function renderStudioPrompt(mode, value) {
   const theme = MODE_LABELS[mode] || MODE_LABELS.plan;
   const badge = theme.bg(theme.fg(` ${theme.label} `));
   const prompt = chalk.cyan("agent> ");
-  const hint = chalk.gray("Tab switch  •  /help  •  /exit");
+  const hint = chalk.gray("Tab mode  •  / command menu  •  Ctrl+K menu  •  /help  •  /exit");
 
   process.stdout.write("\r\x1b[2K");
   process.stdout.write(`${badge} ${prompt}${value}${value ? "  " : ""}${hint}`);
+}
+
+async function runStudioCommand(commandId) {
+  switch (commandId) {
+    case "connect":
+      await cmdConnect();
+      break;
+    case "keys":
+      await cmdKeys();
+      break;
+    case "env":
+      await cmdEnv();
+      break;
+    case "help":
+      renderHelp();
+      break;
+    case "exit":
+      rl?.close();
+      process.exit(0);
+      break;
+    default:
+      break;
+  }
 }
 
 async function promptStudioLine(initialMode) {
@@ -174,10 +210,17 @@ async function promptStudioLine(initialMode) {
       renderStudioPrompt(mode, buffer);
     };
 
-    const onKeypress = (str, key = {}) => {
+    const onKeypress = async (str, key = {}) => {
       if (key.ctrl && key.name === "c") {
         cleanup();
         process.exit(0);
+      }
+
+      if ((key.ctrl && key.name === "k") || (str === "/" && buffer.length === 0)) {
+        cleanup();
+        const command = await openCommandPalette();
+        resolve(command ? { command: command.id, mode } : { cancelled: true, mode });
+        return;
       }
 
       if (key.name === "tab") {
@@ -200,6 +243,137 @@ async function promptStudioLine(initialMode) {
 
       if (typeof str === "string" && str.length > 0 && !key.ctrl && !key.meta) {
         buffer += str;
+        redraw();
+      }
+    };
+
+    readline.emitKeypressEvents(stdin);
+    stdin.setRawMode(true);
+    stdin.resume();
+    stdin.on("keypress", onKeypress);
+    redraw();
+  });
+}
+
+function getPaletteMatches(query) {
+  const normalized = query.trim().toLowerCase();
+  if (!normalized) return STUDIO_COMMANDS;
+  return STUDIO_COMMANDS.filter((command) => {
+    return [command.id, command.label, command.description]
+      .join(" ")
+      .toLowerCase()
+      .includes(normalized);
+  });
+}
+
+function renderCommandPalette(query, matches, index) {
+  const width = Math.max(62, Math.min(process.stdout.columns || 80, 88));
+  const border = chalk.cyan("═".repeat(width - 2));
+  const title = chalk.cyan.bold(" Command Palette ");
+  const helper = chalk.gray("Esc close  •  Enter run  •  ↑↓ navigate  •  type to filter");
+
+  process.stdout.write("\x1b[2J\x1b[H");
+  console.log(chalk.cyan(`╔${border}╗`));
+  console.log(chalk.cyan("║") + title.padEnd(width - 2) + chalk.cyan("║"));
+  console.log(chalk.cyan(`╠${chalk.cyan("═".repeat(width - 2))}╣`));
+  console.log(chalk.cyan("║") + chalk.gray(` Search: ${query}`.padEnd(width - 2)) + chalk.cyan("║"));
+  console.log(chalk.cyan(`╠${chalk.cyan("═".repeat(width - 2))}╣`));
+
+  if (matches.length === 0) {
+    console.log(chalk.cyan("║") + chalk.gray(" No commands found".padEnd(width - 2)) + chalk.cyan("║"));
+  } else {
+    const visible = matches.slice(0, 5);
+    visible.forEach((command, i) => {
+      const selected = i === index;
+      const label = command.label.padEnd(12);
+      const description = command.description;
+      const text = ` ${label} ${description}`.padEnd(width - 2);
+      if (selected) {
+        console.log(chalk.cyan("║") + chalk.bgCyan.black(text.slice(0, width - 2)) + chalk.cyan("║"));
+      } else {
+        console.log(chalk.cyan("║") + chalk.gray(text.slice(0, width - 2)) + chalk.cyan("║"));
+      }
+    });
+    for (let i = visible.length; i < 5; i++) {
+      console.log(chalk.cyan("║") + " ".repeat(width - 2) + chalk.cyan("║"));
+    }
+  }
+
+  console.log(chalk.cyan(`╠${chalk.cyan("═".repeat(width - 2))}╣`));
+  console.log(chalk.cyan("║") + chalk.gray(helper.padEnd(width - 2)) + chalk.cyan("║"));
+  console.log(chalk.cyan(`╚${border}╝`));
+}
+
+async function openCommandPalette() {
+  if (!rl) return null;
+
+  return new Promise((resolve) => {
+    const stdin = process.stdin;
+    let query = "";
+    let index = 0;
+    let matches = getPaletteMatches(query);
+
+    const cleanup = () => {
+      stdin.off("keypress", onKeypress);
+      if (stdin.isTTY && typeof stdin.setRawMode === "function") {
+        stdin.setRawMode(false);
+      }
+      process.stdout.write("\x1b[2J\x1b[H");
+    };
+
+    const redraw = () => {
+      matches = getPaletteMatches(query);
+      if (index >= matches.length) index = Math.max(0, matches.length - 1);
+      renderCommandPalette(query, matches, index);
+    };
+
+    const finish = (command) => {
+      cleanup();
+      resolve(command);
+    };
+
+    const onKeypress = (str, key = {}) => {
+      if (key.ctrl && key.name === "c") {
+        cleanup();
+        process.exit(0);
+      }
+
+      if (key.name === "escape") {
+        finish(null);
+        return;
+      }
+
+      if (key.name === "up") {
+        index = (index - 1 + matches.length) % Math.max(matches.length, 1);
+        redraw();
+        return;
+      }
+
+      if (key.name === "down") {
+        index = (index + 1) % Math.max(matches.length, 1);
+        redraw();
+        return;
+      }
+
+      if (key.name === "backspace") {
+        query = query.slice(0, -1);
+        index = 0;
+        redraw();
+        return;
+      }
+
+      if (key.name === "return") {
+        if (matches.length === 0) {
+          finish(null);
+          return;
+        }
+        finish(matches[index] || matches[0]);
+        return;
+      }
+
+      if (typeof str === "string" && str.length > 0 && !key.ctrl && !key.meta) {
+        query += str;
+        index = 0;
         redraw();
       }
     };
@@ -400,8 +574,20 @@ async function runInteractiveStudio(initialMode) {
   console.log(chalk.gray("Tab switches plan/build. /connect, /keys, /env, /help, /exit\n"));
 
   while (true) {
-    const { text, mode } = await promptStudioLine(currentMode);
+    const result = await promptStudioLine(currentMode);
+    const { text, mode, command, cancelled } = result;
     currentMode = mode;
+
+    if (cancelled) {
+      console.log("");
+      continue;
+    }
+
+    if (command) {
+      await runStudioCommand(command);
+      continue;
+    }
+
     const trimmed = text.trim();
 
     if (trimmed === "" || trimmed === "/exit" || trimmed === "exit" || trimmed === "quit") {
