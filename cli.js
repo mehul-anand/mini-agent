@@ -116,6 +116,7 @@ function showHelp() {
   console.log("  /env        Show current configuration");
   console.log("  /help       Show help");
   console.log("  /exit       Quit");
+  console.log("  Tab         Switch between plan and build modes");
   console.log("");
   console.log(bold("OPTIONS"));
   console.log("  --mode <mode>     Specify mode: plan | build | auto");
@@ -134,6 +135,82 @@ function showHelp() {
 }
 
 if (args.help) showHelp();
+
+const MODE_LABELS = {
+  plan: { label: "PLAN", fg: chalk.black, bg: chalk.bgGreenBright },
+  build: { label: "BUILD", fg: chalk.white, bg: chalk.bgBlueBright },
+};
+
+function renderStudioPrompt(mode, value) {
+  const theme = MODE_LABELS[mode] || MODE_LABELS.plan;
+  const badge = theme.bg(theme.fg(` ${theme.label} `));
+  const prompt = chalk.cyan("agent> ");
+  const hint = chalk.gray("Tab switch  •  /help  •  /exit");
+
+  process.stdout.write("\r\x1b[2K");
+  process.stdout.write(`${badge} ${prompt}${value}${value ? "  " : ""}${hint}`);
+}
+
+async function promptStudioLine(initialMode) {
+  if (!rl) {
+    const input = await ask(`${initialMode}> `);
+    return { text: input, mode: initialMode };
+  }
+
+  return new Promise((resolve) => {
+    const stdin = process.stdin;
+    let buffer = "";
+    let mode = initialMode;
+
+    const cleanup = () => {
+      stdin.off("keypress", onKeypress);
+      if (stdin.isTTY && typeof stdin.setRawMode === "function") {
+        stdin.setRawMode(false);
+      }
+      process.stdout.write("\n");
+    };
+
+    const redraw = () => {
+      renderStudioPrompt(mode, buffer);
+    };
+
+    const onKeypress = (str, key = {}) => {
+      if (key.ctrl && key.name === "c") {
+        cleanup();
+        process.exit(0);
+      }
+
+      if (key.name === "tab") {
+        mode = mode === "plan" ? "build" : "plan";
+        redraw();
+        return;
+      }
+
+      if (key.name === "return") {
+        cleanup();
+        resolve({ text: buffer.trim(), mode });
+        return;
+      }
+
+      if (key.name === "backspace") {
+        buffer = buffer.slice(0, -1);
+        redraw();
+        return;
+      }
+
+      if (typeof str === "string" && str.length > 0 && !key.ctrl && !key.meta) {
+        buffer += str;
+        redraw();
+      }
+    };
+
+    readline.emitKeypressEvents(stdin);
+    stdin.setRawMode(true);
+    stdin.resume();
+    stdin.on("keypress", onKeypress);
+    redraw();
+  });
+}
 
 // ---- Shared: stream agent output ----
 async function streamAgent(agent, query) {
@@ -313,29 +390,32 @@ async function cmdEnv() {
   console.log(chalk.gray("  Key resolution order: env var -> keychain -> config file"));
 }
 
-// ---- Mode: Plan (interactive REPL) ----
-async function planMode() {
-  printHeader("Agent Studio - Plan Mode");
-  console.log(chalk.gray("Model: " + CONFIG.model));
-  console.log(chalk.gray("Commands: /connect, /keys, /env, /help, /exit\n"));
+async function runInteractiveStudio(initialMode) {
+  const planAgent = createPlanAgent();
+  const buildAgent = createBuildAgent();
+  let currentMode = initialMode;
 
-  const agent = createPlanAgent();
+  printHeader("Agent Studio - Interactive");
+  console.log(chalk.gray("Model: " + CONFIG.model));
+  console.log(chalk.gray("Tab switches plan/build. /connect, /keys, /env, /help, /exit\n"));
 
   while (true) {
-    const input = await ask("agent> ");
-    const trimmed = input.trim();
+    const { text, mode } = await promptStudioLine(currentMode);
+    currentMode = mode;
+    const trimmed = text.trim();
 
     if (trimmed === "" || trimmed === "/exit" || trimmed === "exit" || trimmed === "quit") {
       break;
     }
 
-    // Handle built-in commands
     if (trimmed.startsWith("/connect")) { await cmdConnect(); continue; }
     if (trimmed.startsWith("/keys")) { await cmdKeys(); continue; }
     if (trimmed.startsWith("/env")) { await cmdEnv(); continue; }
     if (trimmed.startsWith("/help")) { showHelp(); continue; }
 
+    const agent = currentMode === "plan" ? planAgent : buildAgent;
     console.log("");
+    console.log(chalk.gray(`  Mode: ${currentMode.toUpperCase()}`));
     try {
       await streamAgent(agent, trimmed);
       console.log("");
@@ -349,30 +429,14 @@ async function planMode() {
   process.exit(0);
 }
 
+// ---- Mode: Plan (interactive REPL) ----
+async function planMode() {
+  await runInteractiveStudio("plan");
+}
+
 // ---- Mode: Build ----
 async function buildMode() {
-  printHeader("Agent Studio - Build Mode");
-  console.log(chalk.gray("Model: " + CONFIG.model));
-  console.log(chalk.gray("Enter your fix request or plan.\n"));
-
-  const agent = createBuildAgent();
-
-  while (true) {
-    const input = await ask("agent> ");
-    const trimmed = input.trim();
-    if (trimmed === "" || trimmed === "/exit" || trimmed === "exit" || trimmed === "quit") break;
-
-    console.log("");
-    try {
-      await streamAgent(agent, trimmed);
-      console.log("");
-    } catch (err) {
-      console.log(chalk.red("Error: " + err.message) + "\n");
-    }
-  }
-
-  rl?.close();
-  process.exit(0);
+  await runInteractiveStudio("build");
 }
 
 // ---- Mode: Auto ----
