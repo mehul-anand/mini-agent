@@ -9,6 +9,8 @@ import { getPRTool } from "./tools/index.js";
 import { CONFIG, loadConfig, saveApiKey, clearApiKey, getMaskedKey, KEYCHAIN_SERVICE } from "./config.js";
 import { HumanMessage } from "@langchain/core/messages";
 
+const bold = chalk.bold;
+
 // ---- Argument parser (no external deps) ----
 function parseArgs(argv) {
   const args = { mode: "plan", pr: null, issue: null, model: null, help: false };
@@ -58,7 +60,6 @@ function printHeader(title) {
 }
 
 function showHelp() {
-  const bold = chalk.bold;
   console.log("");
   console.log(chalk.cyan.bold("Agent Studio") + " - CLI Coding Agent");
   console.log("");
