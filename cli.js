@@ -28,6 +28,11 @@ function parseArgs(argv) {
 const args = parseArgs(process.argv.slice(2));
 
 // ---- Terminal I/O ----
+// Only create readline interface for TTY mode — for piped input,
+// readLineFromStdin() reads directly from stdin without readline
+const rl = process.stdin.isTTY
+  ? readline.createInterface({ input: process.stdin, output: process.stdout })
+  : null;
 // Piped input buffer (for non-TTY mode)
 let pipeBuffer = "";
 
@@ -60,7 +65,7 @@ function readLineFromStdin() {
 }
 
 function ask(prompt) {
-  if (process.stdin.isTTY) {
+  if (rl) {
     return new Promise((resolve) => rl.question(chalk.cyan(prompt), resolve));
   }
   process.stdout.write(chalk.cyan(prompt));
@@ -339,7 +344,7 @@ async function planMode() {
     }
   }
 
-  rl.close();
+  rl?.close();
   console.log(chalk.gray("\nGoodbye!"));
   process.exit(0);
 }
@@ -366,7 +371,7 @@ async function buildMode() {
     }
   }
 
-  rl.close();
+  rl?.close();
   process.exit(0);
 }
 
@@ -409,7 +414,7 @@ async function autoMode() {
 
   console.log(chalk.green("\nAuto loop complete!"));
   console.log(chalk.gray("  Review changes with: git diff"));
-  rl.close();
+  rl?.close();
 }
 
 // ---- Main execution ----
