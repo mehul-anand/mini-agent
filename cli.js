@@ -28,18 +28,51 @@ function parseArgs(argv) {
 const args = parseArgs(process.argv.slice(2));
 
 // ---- Terminal I/O ----
-const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+// Piped input buffer (for non-TTY mode)
+let pipeBuffer = "";
+
+function readLineFromStdin() {
+  return new Promise((resolve) => {
+    const onData = (chunk) => {
+      pipeBuffer += chunk.toString();
+      const idx = pipeBuffer.indexOf("\n");
+      if (idx >= 0) {
+        const line = pipeBuffer.slice(0, idx).trim();
+        pipeBuffer = pipeBuffer.slice(idx + 1);
+        process.stdin.removeListener("data", onData);
+        resolve(line);
+      }
+    };
+
+    if (pipeBuffer) {
+      const idx = pipeBuffer.indexOf("\n");
+      if (idx >= 0) {
+        const line = pipeBuffer.slice(0, idx).trim();
+        pipeBuffer = pipeBuffer.slice(idx + 1);
+        resolve(line);
+        return;
+      }
+    }
+
+    process.stdin.setEncoding("utf8");
+    process.stdin.on("data", onData);
+  });
+}
 
 function ask(prompt) {
-  return new Promise((resolve) => rl.question(chalk.cyan(prompt), resolve));
+  if (process.stdin.isTTY) {
+    return new Promise((resolve) => rl.question(chalk.cyan(prompt), resolve));
+  }
+  process.stdout.write(chalk.cyan(prompt));
+  return readLineFromStdin();
 }
 
 function askMasked(prompt) {
-  return new Promise((resolve) => {
-    const stdin = process.stdin;
-    const hadRaw = stdin.isTTY && typeof stdin.setRawMode === "function";
+  const stdin = process.stdin;
+  const hadRaw = stdin.isTTY && typeof stdin.setRawMode === "function";
 
-    if (hadRaw) {
+  if (hadRaw) {
+    return new Promise((resolve) => {
       process.stdout.write(chalk.cyan(prompt));
       stdin.setRawMode(true);
       stdin.once("data", (data) => {
@@ -47,10 +80,11 @@ function askMasked(prompt) {
         process.stdout.write("\n");
         resolve(data.toString().trim());
       });
-    } else {
-      rl.question(chalk.cyan(prompt), (answer) => resolve(answer.trim()));
-    }
-  });
+    });
+  } else {
+    process.stdout.write(chalk.cyan(prompt));
+    return readLineFromStdin();
+  }
 }
 
 function printHeader(title) {
