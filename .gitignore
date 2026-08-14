@@ -17,6 +17,9 @@ Thumbs.db
 # Build output (if you transpile)
 dist/
 
+# Backup of original version
+old_version/
+
 # Temp / cache
 .cache/
 .tmp/
