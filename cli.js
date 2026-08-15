@@ -197,16 +197,100 @@ const MODE_LABELS = {
   build: { label: "BUILD", fg: chalk.white, bg: chalk.bgBlueBright },
 };
 
-function renderStudioPrompt(mode, value) {
-  const theme = MODE_LABELS[mode] || MODE_LABELS.plan;
-  const badge = theme.bg(theme.fg(` ${theme.label} `));
-  const prompt = chalk.cyan("agent> ");
-  const maxInput = Math.max(10, (process.stdout.columns || 80) - 20);
-  const displayValue =
-    value.length > maxInput ? "…" + value.slice(-(maxInput - 1)) : value;
+function wrapText(text, width) {
+  const safeWidth = Math.max(10, width);
+  const words = String(text).trim().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return [""];
 
-  process.stdout.write("\r\x1b[2K");
-  process.stdout.write(`${badge} ${prompt}${displayValue}`);
+  const lines = [];
+  let current = "";
+
+  for (const word of words) {
+    const next = current ? `${current} ${word}` : word;
+    if (next.length <= safeWidth) {
+      current = next;
+      continue;
+    }
+
+    if (current) lines.push(current);
+
+    if (word.length > safeWidth) {
+      for (let i = 0; i < word.length; i += safeWidth) {
+        const chunk = word.slice(i, i + safeWidth);
+        if (chunk.length === safeWidth) lines.push(chunk);
+        else current = chunk;
+      }
+    } else {
+      current = word;
+    }
+  }
+
+  if (current) lines.push(current);
+  return lines.length > 0 ? lines : [""];
+}
+
+function formatTranscriptEntry(entry, width) {
+  const labelMap = {
+    user: "You",
+    assistant: "Agent",
+    tool: "Tool",
+    status: "System",
+  };
+
+  const prefix = labelMap[entry.role] || entry.role || "Note";
+  const prefixText = `${prefix}: `;
+  const lines = wrapText(entry.text, Math.max(10, width - prefixText.length));
+
+  return lines.map((line, index) => {
+    const head = index === 0 ? prefixText : " ".repeat(prefixText.length);
+    return head + line;
+  });
+}
+
+function renderStudioWorkspace(state) {
+  const width = Math.max(72, Math.min(process.stdout.columns || 80, 120));
+  const height = Math.max(24, process.stdout.rows || 24);
+  const theme = MODE_LABELS[state.mode] || MODE_LABELS.plan;
+  const badge = theme.bg(theme.fg(` ${theme.label} `));
+  const header = chalk.cyan.bold("Agent Studio");
+  const topRule = chalk.cyan("─".repeat(width));
+  const footerHint = chalk.gray("Tab mode  •  / menu  •  Ctrl+K palette  •  Esc back  •  Enter send");
+  const inputLabel = chalk.cyan("agent> ");
+  const maxInput = Math.max(10, width - 18);
+  const displayInput =
+    (state.input || "").length > maxInput
+      ? "…" + (state.input || "").slice(-(maxInput - 1))
+      : state.input || "";
+
+  const transcriptLines = [];
+  const entries = state.transcript || [];
+  entries.slice(-100).forEach((entry) => {
+    transcriptLines.push(...formatTranscriptEntry(entry, width - 4));
+    transcriptLines.push("");
+  });
+
+  const bodyHeight = Math.max(8, height - 10);
+  const visibleTranscript = transcriptLines.slice(-bodyHeight);
+
+  process.stdout.write("\x1b[2J\x1b[H");
+  console.log(`${badge} ${header}  ${chalk.gray(`model ${CONFIG.model}`)}  ${chalk.gray(state.status || "ready")}`);
+  console.log(chalk.gray(`Mode switches with Tab. / opens command menu. Esc goes back.`));
+  console.log(topRule);
+
+  if (visibleTranscript.length === 0) {
+    console.log(chalk.gray("Start by typing a request. Use / for commands or Tab to switch mode."));
+  } else {
+    visibleTranscript.forEach((line) => console.log(line));
+  }
+
+  const remaining = bodyHeight - visibleTranscript.length;
+  for (let i = 0; i < Math.max(0, remaining); i++) {
+    console.log("");
+  }
+
+  console.log(topRule);
+  console.log(`${badge} ${inputLabel}${displayInput}`);
+  console.log(footerHint);
 }
 
 async function runStudioCommand(commandId) {
@@ -303,7 +387,7 @@ async function openInfoModal({ screenName, title, bodyLines, footer = "Esc to go
   });
 }
 
-async function promptStudioLine(initialMode) {
+async function promptStudioLine(initialMode, state) {
   if (!rl) {
     const input = await ask(`${initialMode}> `);
     return { text: input, mode: initialMode };
@@ -323,7 +407,19 @@ async function promptStudioLine(initialMode) {
     };
 
     const redraw = () => {
-      renderStudioPrompt(mode, buffer);
+      renderStudioWorkspace({
+        mode,
+        input: buffer,
+        transcript: state.transcript,
+        status: state.status,
+      });
+    };
+
+    const deletePreviousWord = () => {
+      const trimmed = buffer.replace(/\s+$/, "");
+      const next = trimmed.replace(/\S+$/, "");
+      buffer = next;
+      redraw();
     };
 
     const onKeypress = async (str, key = {}) => {
@@ -354,6 +450,11 @@ async function promptStudioLine(initialMode) {
       if (key.name === "backspace") {
         buffer = buffer.slice(0, -1);
         redraw();
+        return;
+      }
+
+      if (key.ctrl && key.name === "w") {
+        deletePreviousWord();
         return;
       }
 
@@ -416,7 +517,7 @@ function renderCommandPalette(query, matches, index) {
   }
 
   console.log(chalk.cyan(`╠${chalk.cyan("═".repeat(width - 2))}╣`));
-    console.log(chalk.cyan("║") + chalk.gray(helper.padEnd(width - 2)) + chalk.cyan("║"));
+  console.log(chalk.cyan("║") + chalk.gray(helper.padEnd(width - 2)) + chalk.cyan("║"));
   console.log(chalk.cyan(`╚${border}╝`));
 }
 
@@ -505,24 +606,30 @@ async function openCommandPalette() {
 }
 
 // ---- Shared: stream agent output ----
-async function streamAgent(agent, query) {
+async function streamAgent(agent, query, handlers = {}) {
   const stream = await agent.stream(
     { messages: [new HumanMessage(query)] },
     { configurable: { thread_id: "default" }, streamMode: "values" },
   );
+
+  let finalText = "";
 
   for await (const chunk of stream) {
     const lastMsg = chunk.messages?.[chunk.messages.length - 1];
     if (!lastMsg) continue;
     if (lastMsg.tool_calls?.length > 0) {
       for (const tc of lastMsg.tool_calls) {
-        console.log(chalk.yellow("  Tool: " + tc.name + "(" + JSON.stringify(tc.args || {}) + ")"));
+        const toolLine = "Tool: " + tc.name + "(" + JSON.stringify(tc.args || {}) + ")";
+        handlers.onTool?.(toolLine);
       }
     }
     if (lastMsg.content && typeof lastMsg.content === "string" && lastMsg.content.trim()) {
-      lastMsg.content.split("\n").forEach((line) => console.log(chalk.green("  " + line)));
+      finalText = lastMsg.content;
+      handlers.onText?.(finalText);
     }
   }
+
+  return finalText;
 }
 
 // ---- Onboarding wizard ----
@@ -807,24 +914,35 @@ async function cmdEnv() {
 async function runInteractiveStudio(initialMode) {
   const planAgent = createPlanAgent();
   const buildAgent = createBuildAgent();
-  let currentMode = initialMode;
+  const interactive = !!rl;
+  const studioState = {
+    mode: initialMode,
+    input: "",
+    transcript: [],
+    status: "ready",
+  };
 
-  printHeader("Agent Studio - Interactive");
-  console.log(chalk.gray("Model: " + CONFIG.model));
-  console.log(chalk.gray("Tab mode  •  / menu  •  Ctrl+K menu  •  Esc back  •  /help  •  /exit\n"));
+  if (interactive) {
+    renderStudioWorkspace(studioState);
+  } else {
+    printHeader("Agent Studio - Interactive");
+    console.log(chalk.gray("Model: " + CONFIG.model));
+    console.log(chalk.gray("Tab mode  •  / menu  •  Ctrl+K menu  •  Esc back  •  /help  •  /exit\n"));
+  }
 
   while (true) {
-    const result = await promptStudioLine(currentMode);
+    const result = await promptStudioLine(studioState.mode, studioState);
     const { text, mode, command, cancelled } = result;
-    currentMode = mode;
+    studioState.mode = mode;
 
     if (cancelled) {
-      console.log("");
+      if (interactive) renderStudioWorkspace(studioState);
       continue;
     }
 
     if (command) {
       await runStudioCommand(command);
+      if (interactive) renderStudioWorkspace(studioState);
       continue;
     }
 
@@ -839,14 +957,45 @@ async function runInteractiveStudio(initialMode) {
     if (trimmed.startsWith("/env")) { await cmdEnv(); continue; }
     if (trimmed.startsWith("/help")) { showHelp(); continue; }
 
-    const agent = currentMode === "plan" ? planAgent : buildAgent;
-    console.log("");
-    console.log(chalk.gray(`  Mode: ${currentMode.toUpperCase()}`));
-    try {
-      await streamAgent(agent, trimmed);
+    const agent = studioState.mode === "plan" ? planAgent : buildAgent;
+    if (interactive) {
+      studioState.transcript.push({ role: "user", text: trimmed });
+      studioState.status = "thinking";
+      renderStudioWorkspace(studioState);
+    } else {
       console.log("");
+      console.log(chalk.gray(`  Mode: ${studioState.mode.toUpperCase()}`));
+    }
+
+    try {
+      const toolLines = [];
+      const response = await streamAgent(agent, trimmed, {
+        onTool: (line) => toolLines.push(line),
+        onText: () => {},
+      });
+
+      if (interactive) {
+        toolLines.forEach((line) => studioState.transcript.push({ role: "tool", text: line }));
+        if (response && response.trim()) {
+          studioState.transcript.push({ role: "assistant", text: response.trim() });
+        }
+        studioState.status = "ready";
+        renderStudioWorkspace(studioState);
+      } else {
+        toolLines.forEach((line) => console.log(chalk.yellow("  " + line)));
+        if (response && response.trim()) {
+          response.trim().split("\n").forEach((line) => console.log(chalk.green("  " + line)));
+        }
+        console.log("");
+      }
     } catch (err) {
-      console.log(chalk.red("Error: " + err.message) + "\n");
+      if (interactive) {
+        studioState.status = "error";
+        studioState.transcript.push({ role: "system", text: "Error: " + err.message });
+        renderStudioWorkspace(studioState);
+      } else {
+        console.log(chalk.red("Error: " + err.message) + "\n");
+      }
     }
   }
 
