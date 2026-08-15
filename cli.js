@@ -201,10 +201,12 @@ function renderStudioPrompt(mode, value) {
   const theme = MODE_LABELS[mode] || MODE_LABELS.plan;
   const badge = theme.bg(theme.fg(` ${theme.label} `));
   const prompt = chalk.cyan("agent> ");
-  const hint = chalk.gray("Tab mode  •  / command menu  •  Ctrl+K menu  •  Esc back  •  /help  •  /exit");
+  const maxInput = Math.max(10, (process.stdout.columns || 80) - 20);
+  const displayValue =
+    value.length > maxInput ? "…" + value.slice(-(maxInput - 1)) : value;
 
   process.stdout.write("\r\x1b[2K");
-  process.stdout.write(`${badge} ${prompt}${value}${value ? "  " : ""}${hint}`);
+  process.stdout.write(`${badge} ${prompt}${displayValue}`);
 }
 
 async function runStudioCommand(commandId) {
@@ -384,7 +386,7 @@ function renderCommandPalette(query, matches, index) {
   const width = Math.max(62, Math.min(process.stdout.columns || 80, 88));
   const border = chalk.cyan("═".repeat(width - 2));
   const title = chalk.cyan.bold(" Command Palette ");
-  const helper = chalk.gray("Esc close  •  Enter run  •  ↑↓ navigate  •  type to filter");
+  const helper = chalk.gray("Esc back  •  Enter run  •  ↑↓ navigate  •  type to filter");
 
   process.stdout.write("\x1b[2J\x1b[H");
   console.log(chalk.cyan(`╔${border}╗`));
@@ -414,7 +416,7 @@ function renderCommandPalette(query, matches, index) {
   }
 
   console.log(chalk.cyan(`╠${chalk.cyan("═".repeat(width - 2))}╣`));
-  console.log(chalk.cyan("║") + chalk.gray(helper.padEnd(width - 2)) + chalk.cyan("║"));
+    console.log(chalk.cyan("║") + chalk.gray(helper.padEnd(width - 2)) + chalk.cyan("║"));
   console.log(chalk.cyan(`╚${border}╝`));
 }
 
@@ -809,7 +811,7 @@ async function runInteractiveStudio(initialMode) {
 
   printHeader("Agent Studio - Interactive");
   console.log(chalk.gray("Model: " + CONFIG.model));
-  console.log(chalk.gray("Tab switches plan/build. /connect, /keys, /env, /help, /exit\n"));
+  console.log(chalk.gray("Tab mode  •  / menu  •  Ctrl+K menu  •  Esc back  •  /help  •  /exit\n"));
 
   while (true) {
     const result = await promptStudioLine(currentMode);
