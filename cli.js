@@ -78,13 +78,54 @@ function askMasked(prompt) {
 
   if (hadRaw) {
     return new Promise((resolve) => {
-      process.stdout.write(chalk.cyan(prompt));
-      stdin.setRawMode(true);
-      stdin.once("data", (data) => {
+      let value = "";
+
+      const cleanup = () => {
+        stdin.off("keypress", onKeypress);
         stdin.setRawMode(false);
         process.stdout.write("\n");
-        resolve(data.toString().trim());
-      });
+      };
+
+      const redraw = () => {
+        process.stdout.write("\r\x1b[2K");
+        process.stdout.write(chalk.cyan(prompt) + "*".repeat(value.length));
+      };
+
+      const onKeypress = (str, key = {}) => {
+        if (key.ctrl && key.name === "c") {
+          cleanup();
+          process.exit(0);
+        }
+
+        if (key.name === "escape") {
+          cleanup();
+          resolve(null);
+          return;
+        }
+
+        if (key.name === "return") {
+          cleanup();
+          resolve(value.trim());
+          return;
+        }
+
+        if (key.name === "backspace") {
+          value = value.slice(0, -1);
+          redraw();
+          return;
+        }
+
+        if (typeof str === "string" && str.length > 0 && !key.ctrl && !key.meta) {
+          value += str;
+          redraw();
+        }
+      };
+
+      process.stdout.write(chalk.cyan(prompt));
+      readline.emitKeypressEvents(stdin);
+      stdin.setRawMode(true);
+      stdin.resume();
+      stdin.on("keypress", onKeypress);
     });
   } else {
     process.stdout.write(chalk.cyan(prompt));
@@ -149,6 +190,8 @@ const STUDIO_COMMANDS = [
   { id: "exit", label: "/exit", description: "Quit the app" },
 ];
 
+const screenStack = [];
+
 const MODE_LABELS = {
   plan: { label: "PLAN", fg: chalk.black, bg: chalk.bgGreenBright },
   build: { label: "BUILD", fg: chalk.white, bg: chalk.bgBlueBright },
@@ -158,7 +201,7 @@ function renderStudioPrompt(mode, value) {
   const theme = MODE_LABELS[mode] || MODE_LABELS.plan;
   const badge = theme.bg(theme.fg(` ${theme.label} `));
   const prompt = chalk.cyan("agent> ");
-  const hint = chalk.gray("Tab mode  •  / command menu  •  Ctrl+K menu  •  /help  •  /exit");
+  const hint = chalk.gray("Tab mode  •  / command menu  •  Ctrl+K menu  •  Esc back  •  /help  •  /exit");
 
   process.stdout.write("\r\x1b[2K");
   process.stdout.write(`${badge} ${prompt}${value}${value ? "  " : ""}${hint}`);
@@ -185,6 +228,77 @@ async function runStudioCommand(commandId) {
     default:
       break;
   }
+}
+
+function pushScreen(name) {
+  screenStack.push(name);
+}
+
+function popScreen() {
+  return screenStack.pop();
+}
+
+function clearScreen() {
+  process.stdout.write("\x1b[2J\x1b[H");
+}
+
+function renderModalShell(title, bodyLines, footer) {
+  clearScreen();
+  const width = Math.max(64, Math.min(process.stdout.columns || 80, 96));
+  const border = chalk.cyan("═".repeat(width - 2));
+  console.log(chalk.cyan(`╔${border}╗`));
+  console.log(chalk.cyan("║") + chalk.cyan.bold(` ${title} `).padEnd(width - 2) + chalk.cyan("║"));
+  console.log(chalk.cyan(`╠${chalk.cyan("═".repeat(width - 2))}╣`));
+  bodyLines.forEach((line) => {
+    console.log(chalk.cyan("║") + chalk.gray(` ${line}`.padEnd(width - 2)) + chalk.cyan("║"));
+  });
+  console.log(chalk.cyan(`╠${chalk.cyan("═".repeat(width - 2))}╣`));
+  console.log(chalk.cyan("║") + chalk.gray(footer.padEnd(width - 2)) + chalk.cyan("║"));
+  console.log(chalk.cyan(`╚${border}╝`));
+}
+
+async function openInfoModal({ screenName, title, bodyLines, footer = "Esc to go back" }) {
+  if (!rl) {
+    bodyLines.forEach((line) => console.log(line));
+    console.log(footer);
+    return;
+  }
+
+  return new Promise((resolve) => {
+    const stdin = process.stdin;
+
+    const cleanup = () => {
+      stdin.off("keypress", onKeypress);
+      if (stdin.isTTY && typeof stdin.setRawMode === "function") {
+        stdin.setRawMode(false);
+      }
+      popScreen();
+      clearScreen();
+    };
+
+    const finish = () => {
+      cleanup();
+      resolve();
+    };
+
+    const onKeypress = (str, key = {}) => {
+      if (key.ctrl && key.name === "c") {
+        cleanup();
+        process.exit(0);
+      }
+
+      if (key.name === "escape" || key.name === "return") {
+        finish();
+      }
+    };
+
+    pushScreen(screenName);
+    readline.emitKeypressEvents(stdin);
+    stdin.setRawMode(true);
+    stdin.resume();
+    stdin.on("keypress", onKeypress);
+    renderModalShell(title, bodyLines, footer);
+  });
 }
 
 async function promptStudioLine(initialMode) {
@@ -318,6 +432,7 @@ async function openCommandPalette() {
       if (stdin.isTTY && typeof stdin.setRawMode === "function") {
         stdin.setRawMode(false);
       }
+      popScreen();
       process.stdout.write("\x1b[2J\x1b[H");
     };
 
@@ -378,6 +493,7 @@ async function openCommandPalette() {
       }
     };
 
+    pushScreen("palette");
     readline.emitKeypressEvents(stdin);
     stdin.setRawMode(true);
     stdin.resume();
@@ -415,6 +531,11 @@ async function runOnboarding() {
   console.log(chalk.gray("Get yours at: https://platform.openai.com/api-keys\n"));
 
   const key = await askMasked("  API Key: ");
+
+  if (key === null) {
+    console.log(chalk.gray("\n  Setup cancelled."));
+    process.exit(0);
+  }
 
   if (!key || key.length < 10) {
     console.log(chalk.red("\n✗ Invalid API key. Must be at least 10 characters."));
@@ -475,6 +596,12 @@ async function cmdConnect() {
   }
 
   const key = await askMasked("  New API Key: ");
+
+  if (key === null) {
+    console.log(chalk.gray("  Cancelled."));
+    return;
+  }
+
   if (!key || key.length < 10) {
     console.log(chalk.red("✗ Invalid key"));
     return;
@@ -487,60 +614,149 @@ async function cmdConnect() {
 }
 
 async function cmdKeys() {
-  printHeader("Keys — Manage Stored Credentials");
+  if (!rl) {
+    printHeader("Keys — Manage Stored Credentials");
 
-  if (CONFIG.openaiApiKey) {
-    console.log("  Current key: " + chalk.gray(getMaskedKey()));
-  } else {
-    console.log(chalk.gray("  No API key configured"));
-  }
+    if (CONFIG.openaiApiKey) {
+      console.log("  Current key: " + chalk.gray(getMaskedKey()));
+    } else {
+      console.log(chalk.gray("  No API key configured"));
+    }
 
-  console.log("");
-  console.log(bold("  Options:"));
-  console.log("  (1) Test current key");
-  console.log("  (2) Remove current key");
-  console.log("  (3) Go back");
-  const choice = await ask("  Select: ");
+    console.log("");
+    console.log(bold("  Options:"));
+    console.log("  (1) Test current key");
+    console.log("  (2) Remove current key");
+    console.log("  (3) Go back");
+    const choice = await ask("  Select: ");
 
-  switch (choice.trim()) {
-    case "1": {
-      if (!CONFIG.openaiApiKey) {
-        console.log(chalk.yellow("No key to test. Use /connect to add one."));
-      } else {
-        console.log(chalk.gray("  Verifying..."));
-        try {
-          const { ChatOpenAI } = await import("@langchain/openai");
-          const model = new ChatOpenAI({
-            model: "gpt-3.5-turbo",
-            apiKey: CONFIG.openaiApiKey,
-            maxTokens: 10,
-          });
-          const res = await model.invoke("Hello");
-          console.log(chalk.green("  ✓ Key is valid! (" + res?.usage?.model + ")"));
-        } catch (e) {
-          console.log(chalk.red("  ✗ Key may be invalid: " + e.message));
+    switch (choice.trim()) {
+      case "1": {
+        if (!CONFIG.openaiApiKey) {
+          console.log(chalk.yellow("No key to test. Use /connect to add one."));
+        } else {
+          console.log(chalk.gray("  Verifying..."));
+          try {
+            const { ChatOpenAI } = await import("@langchain/openai");
+            const model = new ChatOpenAI({
+              model: "gpt-3.5-turbo",
+              apiKey: CONFIG.openaiApiKey,
+              maxTokens: 10,
+            });
+            const res = await model.invoke("Hello");
+            console.log(chalk.green("  ✓ Key is valid! (" + res?.usage?.model + ")"));
+          } catch (e) {
+            console.log(chalk.red("  ✗ Key may be invalid: " + e.message));
+          }
         }
+        break;
       }
-      break;
-    }
-    case "2": {
-      const confirm = await ask("  Are you sure? Type 'yes' to confirm: ");
-      if (confirm.trim().toLowerCase() === "yes") {
-        await clearApiKey();
-        console.log(chalk.green("✓ Key removed"));
-      } else {
-        console.log("  Cancelled.");
+      case "2": {
+        const confirm = await ask("  Are you sure? Type 'yes' to confirm: ");
+        if (confirm.trim().toLowerCase() === "yes") {
+          await clearApiKey();
+          console.log(chalk.green("✓ Key removed"));
+        } else {
+          console.log("  Cancelled.");
+        }
+        break;
       }
-      break;
+      default:
+        break;
     }
-    default:
-      break;
+
+    return;
   }
+
+  let status = "";
+
+  const runTest = async () => {
+    if (!CONFIG.openaiApiKey) {
+      status = "No key to test. Use /connect to add one.";
+      return;
+    }
+    status = "Verifying key...";
+    renderKeys();
+    try {
+      const { ChatOpenAI } = await import("@langchain/openai");
+      const model = new ChatOpenAI({
+        model: "gpt-3.5-turbo",
+        apiKey: CONFIG.openaiApiKey,
+        maxTokens: 10,
+      });
+      const res = await model.invoke("Hello");
+      status = "✓ Key is valid!" + (res?.usage?.model ? ` (${res.usage.model})` : "");
+    } catch (e) {
+      status = "✗ Key may be invalid: " + e.message;
+    }
+    renderKeys();
+  };
+
+  const removeKey = async () => {
+    await clearApiKey();
+    await loadConfig();
+    status = "✓ Key removed";
+    renderKeys();
+  };
+
+  const renderKeys = () => {
+    const bodyLines = [
+      CONFIG.openaiApiKey ? `Current key: ${getMaskedKey()}` : "No API key configured",
+      "",
+      "1) Test current key",
+      "2) Remove current key",
+      "3) Back",
+      "",
+      status || "Esc to go back",
+    ];
+    renderModalShell("Keys — Manage Stored Credentials", bodyLines, "Esc back  •  1 test  •  2 remove  •  3 back");
+  };
+
+  return new Promise((resolve) => {
+    const stdin = process.stdin;
+
+    const cleanup = () => {
+      stdin.off("keypress", onKeypress);
+      if (stdin.isTTY && typeof stdin.setRawMode === "function") {
+        stdin.setRawMode(false);
+      }
+      popScreen();
+      clearScreen();
+      resolve();
+    };
+
+    const onKeypress = async (str, key = {}) => {
+      if (key.ctrl && key.name === "c") {
+        cleanup();
+        process.exit(0);
+      }
+
+      if (key.name === "escape" || key.name === "return" || str === "3") {
+        cleanup();
+        return;
+      }
+
+      if (str === "1") {
+        await runTest();
+        return;
+      }
+
+      if (str === "2") {
+        await removeKey();
+        return;
+      }
+    };
+
+    pushScreen("keys");
+    readline.emitKeypressEvents(stdin);
+    stdin.setRawMode(true);
+    stdin.resume();
+    stdin.on("keypress", onKeypress);
+    renderKeys();
+  });
 }
 
 async function cmdEnv() {
-  printHeader("Environment");
-
   const configFile = CONFIG.configFile;
   let fileExists = false;
   let fileConfig = {};
@@ -549,19 +765,41 @@ async function cmdEnv() {
     fileExists = true;
   } catch {}
 
-  console.log("  OpenAI Key:      " + chalk.gray(CONFIG.openaiApiKey ? getMaskedKey() : "(not set)"));
-  console.log("  Model:           " + CONFIG.model);
-  console.log("  Config file:     " + (fileExists ? configFile : "(not found)"));
-  console.log("  Env var:         " + (process.env.OPENAI_API_KEY ? "OPENAI_API_KEY is set" : "(not set)"));
-  console.log("  Keychain:        " + (CONFIG.keychainAvailable ? "available" : "unavailable"));
-  console.log("  Config dir:      " + CONFIG.configDir);
+  if (!rl) {
+    printHeader("Environment");
+    console.log("  OpenAI Key:      " + chalk.gray(CONFIG.openaiApiKey ? getMaskedKey() : "(not set)"));
+    console.log("  Model:           " + CONFIG.model);
+    console.log("  Config file:     " + (fileExists ? configFile : "(not found)"));
+    console.log("  Env var:         " + (process.env.OPENAI_API_KEY ? "OPENAI_API_KEY is set" : "(not set)"));
+    console.log("  Keychain:        " + (CONFIG.keychainAvailable ? "available" : "unavailable"));
+    console.log("  Config dir:      " + CONFIG.configDir);
 
-  if (Object.keys(fileConfig).length > 0 && !fileConfig.apiKey) {
-    console.log("  File contents:   " + JSON.stringify(fileConfig));
+    if (Object.keys(fileConfig).length > 0 && !fileConfig.apiKey) {
+      console.log("  File contents:   " + JSON.stringify(fileConfig));
+    }
+
+    console.log("");
+    console.log(chalk.gray("  Key resolution order: env var -> keychain -> config file"));
+    return;
   }
 
-  console.log("");
-  console.log(chalk.gray("  Key resolution order: env var -> keychain -> config file"));
+  const bodyLines = [
+    `OpenAI Key: ${CONFIG.openaiApiKey ? getMaskedKey() : "(not set)"}`,
+    `Model: ${CONFIG.model}`,
+    `Config file: ${fileExists ? configFile : "(not found)"}`,
+    `Env var: ${process.env.OPENAI_API_KEY ? "OPENAI_API_KEY is set" : "(not set)"}`,
+    `Keychain: ${CONFIG.keychainAvailable ? "available" : "unavailable"}`,
+    `Config dir: ${CONFIG.configDir}`,
+    "",
+    "Key resolution order: env var -> keychain -> config file",
+  ];
+
+  await openInfoModal({
+    screenName: "env",
+    title: "Environment",
+    bodyLines,
+    footer: "Esc back  •  Enter back",
+  });
 }
 
 async function runInteractiveStudio(initialMode) {
