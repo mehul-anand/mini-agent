@@ -20,6 +20,9 @@ dist/
 # Backup of original version
 old_version/
 
+# Current v2 snapshot
+new_version/
+
 # Temp / cache
 .cache/
 .tmp/
