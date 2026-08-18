@@ -23,6 +23,9 @@ old_version/
 # Current v2 snapshot
 new_version/
 
+# Records / safety net (backup + changelog + v3 build)
+records/
+
 # Temp / cache
 .cache/
 .tmp/
