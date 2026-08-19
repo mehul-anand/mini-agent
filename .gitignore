@@ -20,9 +20,11 @@ dist/
 # Backup of original version
 old_version/
 
-# Old v2 scratch (keep private; v3 lives in new_version/ root)
-new_version/v2-reference/
-new_version/node_modules/
+# Old v2 scratch (reference material for later autoLoop reuse)
+v2-reference/
+
+# Legacy v1 archive (safety-net copy also in records/backup/)
+v1/
 
 # Records / safety net (backup + changelog + v3 build)
 records/
