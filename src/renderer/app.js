@@ -13,7 +13,9 @@ import {
   fg,
 } from "@opentui/core";
 import { resolveApiKey, CONFIG, loadConfig } from "../config/config.js";
-import { streamChat, SYSTEM_PROMPT } from "../agent/chat.js";
+import { streamChat } from "../agent/chat.js";
+import { SYSTEM_PROMPT } from "../prompts/system.js";
+import { runAgentLoop } from "../agent/loop.js";
 
 const C = {
   bg: "#0d1117",
@@ -164,11 +166,19 @@ async function sendToAgent() {
   const messages = [{ role: "system", content: SYSTEM_PROMPT }, ...history];
 
   try {
-    await streamChat({
+    await runAgentLoop({
       messages,
       model: CONFIG.model || "gpt-4o",
       apiKey,
+      mode: state.mode,
       onToken: (token) => agentMsg.append(token),
+      onToolCall: (name, args) => {
+        setStatus("tool");
+        addMessage("system", `⚙ ${name}(${args || ""})`);
+      },
+      onObservation: (name, out) => {
+        addMessage("system", `↳ ${name} → ${out}`);
+      },
       onDone: () => agentMsg.finish(),
       onError: (err) => {
         agentMsg.setText("Error: " + (err?.message || String(err)));

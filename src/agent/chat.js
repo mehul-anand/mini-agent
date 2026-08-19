@@ -1,4 +1,5 @@
 import OpenAI from "openai";
+import { SYSTEM_PROMPT } from "../prompts/system.js";
 
 /**
  * Stream a chat completion from OpenAI, invoking onToken for each delta.
@@ -37,5 +38,3 @@ export async function streamChat({
     throw err;
   }
 }
-
-export const SYSTEM_PROMPT = `You are AI Studio, a terminal coding agent. Help the user with software engineering tasks: writing, editing, debugging, and explaining code. Be concise and direct. Use Markdown, and always put code in fenced blocks with a language tag. Do not invent file paths or APIs unless the user provided them.`;

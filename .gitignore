@@ -29,6 +29,9 @@ v1/
 # Records / safety net (backup + changelog + v3 build)
 records/
 
+# Architecture / planning notes (private, not shipped)
+notes/
+
 # Temp / cache
 .cache/
 .tmp/
