@@ -1,0 +1,30 @@
+{
+  "name": "ai-studio",
+  "version": "3.0.0",
+  "description": "opencode-style CLI coding agent with OpenTUI + streaming OpenAI + BYOK",
+  "type": "module",
+  "main": "new_version/bin/cli.js",
+  "bin": {
+    "mini-agent": "new_version/bin/cli.js"
+  },
+  "engines": {
+    "bun": ">=1.0.0"
+  },
+  "scripts": {
+    "start": "bun new_version/bin/cli.js",
+    "dev": "bun new_version/bin/cli.js"
+  },
+  "keywords": [
+    "agent",
+    "cli",
+    "coding-agent",
+    "tui",
+    "opentui"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@opentui/core": "^0.3.0",
+    "openai": "^5.7.0",
+    "keytar": "^7.9.0"
+  }
+}

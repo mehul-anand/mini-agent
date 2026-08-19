@@ -20,8 +20,9 @@ dist/
 # Backup of original version
 old_version/
 
-# Current v2 snapshot
-new_version/
+# Old v2 scratch (keep private; v3 lives in new_version/ root)
+new_version/v2-reference/
+new_version/node_modules/
 
 # Records / safety net (backup + changelog + v3 build)
 records/
