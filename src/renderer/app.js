@@ -130,7 +130,7 @@ function welcome() {
   );
   box.add(
     new TextRenderable(renderer, {
-      content: t`${fg(C.muted)("opencode-style CLI coding agent — streaming OpenAI chat")}`,
+      content: t`${fg(C.muted)("AI Studio — your terminal coding agent. Plug in your API key to start.")}`,
       fg: C.muted,
     }),
   );
@@ -148,7 +148,7 @@ async function sendToAgent() {
   if (!apiKey) {
     addMessage(
       "system",
-      "No OPENAI_API_KEY set. Export it (or run /connect) to enable responses.",
+      "No API key set. Export your OPENAI_API_KEY (or run /connect) to enable responses.",
     );
     setStatus("ready");
     return;

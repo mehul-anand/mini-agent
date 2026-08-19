@@ -1,7 +1,7 @@
 {
   "name": "ai-studio",
   "version": "3.0.0",
-  "description": "opencode-style CLI coding agent with OpenTUI + streaming OpenAI + BYOK",
+  "description": "AI Studio — a terminal coding agent you run with your own API key (BYOK).",
   "type": "module",
   "main": "bin/cli.js",
   "bin": {
