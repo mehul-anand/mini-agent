@@ -1,5 +1,9 @@
 import OpenAI from "openai";
-import { toolsForMode, toOpenAISchema, executeToolCall } from "../tools/index.js";
+import {
+  toolsForMode,
+  toOpenAISchema,
+  executeToolCall,
+} from "../tools/index.js";
 
 const MAX_ITERATIONS = 10;
 
@@ -31,7 +35,7 @@ export async function runAgentLoop({
 }) {
   const client = new OpenAI({ apiKey });
   const tools = toolsForMode(mode).map(toOpenAISchema);
-  const toolChoice = tools.length ? "auto" : "none";
+  const tool_choice = tools.length ? "auto" : "none";
 
   let conversation = messages.slice();
   let iterations = 0;
@@ -43,7 +47,7 @@ export async function runAgentLoop({
         model,
         messages: conversation,
         tools,
-        toolChoice,
+        tool_choice,
         stream: true,
         temperature: 0.2,
       });
@@ -62,7 +66,9 @@ export async function runAgentLoop({
 
         if (delta.tool_calls) {
           for (const tc of delta.tool_calls) {
-            const slot = toolCalls[tc.index] || (toolCalls[tc.index] = { id: "", name: "", arguments: "" });
+            const slot =
+              toolCalls[tc.index] ||
+              (toolCalls[tc.index] = { id: "", name: "", arguments: "" });
             if (tc.id) slot.id = tc.id;
             if (tc.function?.name) slot.name = tc.function.name;
             if (tc.function?.arguments) slot.arguments += tc.function.arguments;
@@ -80,13 +86,11 @@ export async function runAgentLoop({
       conversation.push({
         role: "assistant",
         content: content || null,
-        tool_calls: toolCalls
-          .filter(Boolean)
-          .map((tc) => ({
-            id: tc.id,
-            type: "function",
-            function: { name: tc.name, arguments: tc.arguments },
-          })),
+        tool_calls: toolCalls.filter(Boolean).map((tc) => ({
+          id: tc.id,
+          type: "function",
+          function: { name: tc.name, arguments: tc.arguments },
+        })),
       });
 
       // Execute each tool call and append observations.
@@ -94,7 +98,9 @@ export async function runAgentLoop({
         onToolCall?.(tc.name, tc.arguments);
         let output;
         try {
-          output = await executeToolCall({ function: { name: tc.name, arguments: tc.arguments } });
+          output = await executeToolCall({
+            function: { name: tc.name, arguments: tc.arguments },
+          });
         } catch (err) {
           output = `Tool error: ${err?.message || String(err)}`;
         }
