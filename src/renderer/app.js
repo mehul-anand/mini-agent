@@ -33,6 +33,7 @@ const C = {
 let renderer, root, headerMode, headerStatus, transcript, composer;
 let syntaxStyle;
 const state = { mode: "PLAN", status: "ready", messages: [] };
+const MODES = ["PLAN", "BUILD"];
 
 function roleColor(role) {
   if (role === "user") return C.user;
@@ -49,7 +50,9 @@ function roleLabel(role) {
 }
 
 function modeColor(mode) {
-  return mode === "PLAN" ? C.accent : C.user;
+  if (mode === "PLAN") return C.accent;
+  if (mode === "BUILD") return C.user;
+  return C.system;
 }
 
 export function setStatus(status) {
@@ -63,6 +66,11 @@ export function setMode(mode) {
     headerMode.content = `● ${mode}`;
     headerMode.fg = modeColor(mode);
   }
+}
+
+function cycleMode() {
+  const idx = MODES.indexOf(state.mode);
+  setMode(MODES[(idx + 1) % MODES.length]);
 }
 
 export function addMessage(role, text = "") {
@@ -270,7 +278,7 @@ export async function runApp() {
   composer = new TextareaRenderable(renderer, {
     width: "100%",
     height: 3,
-    placeholder: "Type a message — Enter to send · Esc to quit",
+    placeholder: "Type a message — Enter to send · Tab/M: switch mode · Esc to quit",
     backgroundColor: C.panel,
     focusedBackgroundColor: "#1c2333",
     textColor: C.text,
@@ -288,6 +296,7 @@ export async function runApp() {
 
   renderer.keyInput.on("keypress", (key) => {
     if (key.name === "escape") renderer.destroy();
+    if (key.name === "tab" || key.name?.toLowerCase() === "m") cycleMode();
   });
 
   composer.focus();

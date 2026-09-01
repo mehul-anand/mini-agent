@@ -3,6 +3,8 @@ import readFile from "./readFile.js";
 import grep from "./grep.js";
 import gitStatus from "./gitStatus.js";
 import gitDiff from "./gitDiff.js";
+import writeFile from "./writeFile.js";
+import editFile from "./editFile.js";
 
 /**
  * Tool registry + adapter.
@@ -10,7 +12,15 @@ import gitDiff from "./gitDiff.js";
  * aggregated here. `MODE_TOOLS` mirrors v2's PLAN/BUILD/AUTO grouping.
  */
 
-export const TOOLS = [listFiles, readFile, grep, gitStatus, gitDiff];
+export const TOOLS = [
+  listFiles,
+  readFile,
+  grep,
+  gitStatus,
+  gitDiff,
+  writeFile,
+  editFile,
+];
 
 /**
  * Mode → tool name whitelist (defense-in-depth on top of runtime checks).
@@ -18,7 +28,15 @@ export const TOOLS = [listFiles, readFile, grep, gitStatus, gitDiff];
  */
 export const MODE_TOOLS = {
   PLAN: ["list_files", "read_file", "grep", "git_status", "git_diff"],
-  BUILD: ["list_files", "read_file", "grep", "git_status", "git_diff"],
+  BUILD: [
+    "list_files",
+    "read_file",
+    "grep",
+    "git_status",
+    "git_diff",
+    "write_file",
+    "edit_file",
+  ],
   AUTO: ["list_files", "read_file", "grep", "git_status", "git_diff"],
 };
 
